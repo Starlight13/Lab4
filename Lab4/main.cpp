@@ -1,47 +1,130 @@
-#include <string>
 #include <iostream>
 #include <fstream>
 #include <math.h>
 #include <vector>
 #include <bitset>
 #include <limits>
+#include <unordered_map>
 #include <map>
 
 using namespace std;
-
 using byte = unsigned char;
-using bits_in_byte = bitset<size_t(16)>;
-constexpr size_t BITS_PER_BYTE = 16;
+using bits_in_byte = bitset<size_t(8)>;
+constexpr size_t BITS_PER_BYTE = numeric_limits<byte>::digits;
 
 
 class archivator {
-private:
-    string content;
-    
-    ifstream input;
     ofstream output;
-public:
-    void compress(int, char const**);
-    string zlwEncode(string);
-    void decompress(int, char const**);
-    string zlwDecode(string bitstring);
+    ifstream input;
     
-    string itob(unsigned long int, int);
+public:
+    ~archivator();
+    
+    void compress(char const **, int);
+    string content_to_bits(string);
+    string zlwEncode(string);
+    int len(int);
+    string to_binary_string(unsigned long int, int);
+    
+    void decompress(int, char const**);
     int bits_to_int(string);
+    string zlwDecode(string bitstring);
 };
 
-string archivator::itob(unsigned long int n, int lenght) {
+archivator::~archivator() {
+    if (input.is_open())
+        input.close();
+    
+    if (output.is_open())
+        output.close();
+}
+
+void archivator::compress(char const **argv, int argc) {
+    string bitstring("");
+    
+    for (int i = 3; i < argc; i++) {
+        cout << "Compressing file " << argv[i] << "... ";
+        
+        input.open(argv[i], ios::binary);
+        bitstring += content_to_bits(argv[i]);
+        input.close();
+        
+        cout << "Done." << endl;
+    }
+    
+    bitstring = zlwEncode(bitstring);
+    bitstring.erase(0, 1);
+    
+    while (bitstring.size() % BITS_PER_BYTE)
+        bitstring += '0';
+    
+    output.open(argv[2], ios::binary);
+    for (size_t i = 0; i < bitstring.size(); i += BITS_PER_BYTE) {
+        byte b = bits_in_byte(bitstring.substr(i, BITS_PER_BYTE)).to_ulong();
+        output << b;
+    }
+    
+    cout << "Result written to " << argv[2] << endl;
+}
+
+string archivator::content_to_bits(string filename) {
+    string buff(""), bitstring("");
+    char c;
+    
+    for (size_t i = 0; i < filename.size(); i++) {
+        bitstring += bits_in_byte(byte(filename.at(i))).to_string();
+    }
+    
+    bitstring += bits_in_byte(byte('\a')).to_string();
+    
+    while (input.get(c)) {
+        buff += bits_in_byte(byte(c)).to_string();
+    }
+    
+    bitstring += to_binary_string(buff.size(), 64);
+    bitstring.append(buff);
+    
+    return bitstring;
+}
+
+string archivator::zlwEncode(string bitstring) {
+    string buff(""), result("");
+    unordered_map<std::string, int> dictionary = {{"", 0}};
+    
+    for (int i = 0; i < bitstring.size(); i++) {
+        if (dictionary.find(buff + bitstring.at(i)) != dictionary.end()) {
+            buff += bitstring.at(i);
+        } else {
+            result += to_binary_string(dictionary[buff], len(dictionary.size()));
+            result += bitstring.at(i);
+            dictionary[buff + bitstring.at(i)] = dictionary.size();
+            buff = "";
+        }
+    }
+    
+    if (buff != "")
+        result += to_binary_string(dictionary[buff], len(dictionary.size()));
+    
+    return result;
+}
+
+int archivator::len(int number) {
+    return ceil(log2(number));
+}
+
+string archivator::to_binary_string(unsigned long int n, int lenght) {
     string result = "", buff;
     
-    while (n > 0) {
+    do {
         buff = result;
         result = ('0' + (n % 2));
         result += buff;
         n = n / 2;
-    }
-    while (result.size() < lenght) {
+    } while (n > 0);
+    
+    while (result.size() < lenght)
         result.insert(0, "0");
-    }
+    
     return result;
 }
 
@@ -51,33 +134,6 @@ int archivator::bits_to_int(string bits) {
         i++;
     for (; i < size; i++)
         result += (int(bits[i]) - int('0')) *  int(pow(2, size - i - 1));
-    
-    return result;
-}
-
-string archivator::zlwEncode(string uncompressed) {
-    string result = "";
-    int dictSize = 256;
-    std::map<std::string,int> dictionary;
-    for (int i = 0; i < 256; i++)
-        dictionary[std::string(1, i)] = i;
-    
-    std::string w;
-    for (std::string::const_iterator it = uncompressed.begin();
-         it != uncompressed.end(); ++it) {
-        char c = *it;
-        std::string wc = w + c;
-        if (dictionary.count(wc))
-            w = wc;
-        else {
-            result.append(itob(dictionary[w], BITS_PER_BYTE));
-            dictionary[wc] = dictSize++;
-            w = std::string(1, c);
-        }
-    }
-    
-    if (!w.empty())
-        result.append(itob(dictionary[w], BITS_PER_BYTE));
     
     return result;
 }
@@ -117,58 +173,6 @@ string archivator::zlwDecode(string bitstring) {
     return result;
 }
 
-void archivator::compress(int argc, const char **argv) {
-    cout << "compressing...\n";
-    string bitstring("");
-    
-    string filename("22.png");
-    
-    input.open(filename, ios::binary);
-    char c;
-    if (input) {
-        for (size_t i = 0; i < filename.size(); i++)
-            bitstring.append(bits_in_byte(byte(filename.at(i))).to_string());
-        
-        bitstring += bits_in_byte(byte('\a')).to_string();
-        
-        while (input.get(c)) {
-            bitstring.append(bits_in_byte(byte(c)).to_string());
-        }
-        
-        //        cout << endl << bitstring.size() << endl<< endl<< endl;
-        
-        bitstring = zlwEncode(bitstring);
-        
-        
-        bitstring = zlwDecode(bitstring);
-        
-        //        cout << endl << bitstring.size();
-        
-        
-        filename = "";
-        int size = 0;
-        bool isFilenameRecording = true;
-        for (int i = 0; i < bitstring.size(); i += BITS_PER_BYTE) {
-            char c = bits_to_int(bitstring.substr(i, BITS_PER_BYTE));
-            
-            if (isFilenameRecording) {
-                filename += c;
-                
-                if (c == '\a') {
-                    isFilenameRecording = false;
-                    output.open("0"+filename, ios::binary);
-                }
-            } else {
-                byte b = bits_to_int(bitstring.substr(i, BITS_PER_BYTE));
-                output << b;
-            }
-            
-        }
-    } else
-        printf("[Could not open file %s]\n", filename.c_str());
-    
-}
-
 void archivator::decompress(int, char const**) {
     string bitstring("");
     string filename("lr5.doc");
@@ -184,43 +188,23 @@ void archivator::decompress(int, char const**) {
     
 }
 
-
-class Interface{
-public:
-    Interface(int argc, const char* argv[]){
-        archivator arc;
-        
-        if (!(argc > 1)) {
-            cout << "Not enough arguments";
-            return;
-        }
-        else if(!strncmp(argv[1], "--compress", 10)){
-            if(argc>=4)
-                arc.compress(argc, argv);
-            else{
-                cout << "Enter at 1 output file and at least 1 file to compress";
-                return;
-            }
-        }
-        else if(!strncmp(argv[1], "--decompress", 12)){
-            if(argc==3)
-                arc.decompress(argc, argv);
-            else{
-                cout << "Enter only a file to decompress";
-                return;
-            }
-        }
-        else{
-            cout << "Choose an option --compress/--decompress";
-            return;
-        }
-        return;
-    }
-};
-
-
-
 int main(int argc, const char * argv[]) {
-    Interface(argc, argv);
+    archivator arc;
     
+    if (!(argc > 1))
+        cout << "Not enough arguments";
+    else if(!strncmp(argv[1], "--compress", 10)){
+        if (argc >= 4)
+            arc.compress(argv, argc);
+        else
+            cout << "Enter at 1 output file and at least 1 file to compress";
+    } else if(!strncmp(argv[1], "--decompress", 12)){
+        if (argc == 3)
+            arc.decompress(argc, argv);
+        else
+            cout << "Enter only a file to decompress";
+    } else
+        cout << "Choose an option --compress/--decompress";
+    
+    return 0;
 }
