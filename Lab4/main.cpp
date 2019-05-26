@@ -5,7 +5,6 @@
 #include <bitset>
 #include <limits>
 #include <unordered_map>
-#include <map>
 
 using namespace std;
 using byte = unsigned char;
@@ -20,15 +19,18 @@ class archivator {
 public:
     ~archivator();
     
+    void decompress(string);
+    string buffer;
+    void fill_buffer();
+    string fetch_bits(int);
+    int bits_to_int(string);
+    void zlwDecode(string &);
+    
     void compress(char const **, int);
     string content_to_bits(string);
     string zlwEncode(string);
     int len(int);
     string to_binary_string(unsigned long int, int);
-    
-    void decompress(int, char const**);
-    int bits_to_int(string);
-    string zlwDecode(string bitstring);
 };
 
 archivator::~archivator() {
@@ -37,6 +39,112 @@ archivator::~archivator() {
     
     if (output.is_open())
         output.close();
+}
+
+void archivator::fill_buffer() {
+    char c;
+    buffer = "";
+    
+    while (!input.eof()) {
+        input.get(c);
+        buffer += bits_in_byte(byte(c)).to_string();
+    }
+}
+
+void archivator::decompress(string path) {
+    input.open(path, ios::binary);
+    fill_buffer();
+    
+    string buff = "", newItem;
+    string result = "";
+    vector<string> dictionary;
+    dictionary.push_back(buff);
+    int i = 0, k = 0;
+    
+    buff = fetch_bits(1);
+    dictionary.push_back(buff);
+    result.append(dictionary[1]);
+    
+    while (!buffer.empty()) {
+        for (int j = 0; j < pow(2, k) && !buffer.empty(); j++) {
+            buff = fetch_bits(k + 2);
+            i += k + 2;
+            newItem = dictionary[bits_to_int(buff.substr(0, k + 1))];
+            
+            if (buff.size() > k + 1)
+                newItem += buff.substr(k + 1);
+            
+            dictionary.push_back(newItem);
+            result.append(newItem);
+        }
+        k++;
+    }
+    
+    zlwDecode(result);
+}
+
+string archivator::fetch_bits(int lenght) {
+    string result = buffer.substr(0, lenght);
+    buffer.erase(0, lenght);
+    
+    return result;
+}
+
+int archivator::bits_to_int(string bits) {
+    int result = 0, i = 0, size = bits.size();
+    
+    while (bits[i] == 0)
+        i++;
+    
+    for (; i < size; i++)
+        result += (int(bits[i]) - int('0')) *  int(pow(2, size - i - 1));
+    
+    return result;
+}
+
+void archivator::zlwDecode(string &bitstring) {
+    ofstream out;
+    string filename = "";
+    int size_of_file;
+    int i = 0, limit = bitstring.size() - bitstring.size() % 8, count = 0;
+    char c;
+    
+    while (i + 8 < limit) {
+        c = bits_in_byte(bitstring.substr(i, BITS_PER_BYTE)).to_ulong();
+        i += 8;
+        
+        while (c != '\a' && i + 8 < limit) {
+            filename += c;
+            c = bits_in_byte(bitstring.substr(i, BITS_PER_BYTE)).to_ulong();
+            i += 8;
+        }
+        
+        cout << "Getting out file " << filename << "... ";
+        count++;
+        
+        out.open(filename, ios::binary);
+        
+        size_of_file = bits_to_int(bitstring.substr(i, 64));
+        i += 64;
+        
+        c = bits_in_byte(bitstring.substr(i, BITS_PER_BYTE)).to_ulong();
+        i += 8;
+        size_of_file -= 8;
+        
+        while (size_of_file > 0) {
+            out << c;
+            c = bits_in_byte(bitstring.substr(i, BITS_PER_BYTE)).to_ulong();
+            i += 8;
+            size_of_file -= 8;
+        }
+        
+        cout << "Done." << endl;
+        
+        out.close();
+        filename = "";
+    }
+    
+    cout << count << " files written." << endl;
 }
 
 void archivator::compress(char const **argv, int argc) {
@@ -128,66 +236,6 @@ string archivator::to_binary_string(unsigned long int n, int lenght) {
     return result;
 }
 
-int archivator::bits_to_int(string bits) {
-    int result = 0, i = 0, size = bits.size();
-    while (bits[i] == 0)
-        i++;
-    for (; i < size; i++)
-        result += (int(bits[i]) - int('0')) *  int(pow(2, size - i - 1));
-    
-    return result;
-}
-
-string archivator::zlwDecode(string bitstring) {
-    vector<int> str;
-    cout << endl;
-    for (int i = 0; i < bitstring.size(); i += BITS_PER_BYTE)
-        str.push_back(bits_to_int(bitstring.substr(i, BITS_PER_BYTE)));
-    
-    std::__1::vector<int, std::__1::allocator<int> >::iterator begin = str.begin();
-    std::__1::vector<int, std::__1::allocator<int> >::iterator end = str.end();
-    
-    int dictSize = 256;
-    std::map<int,std::string> dictionary;
-    for (int i = 0; i < 256; i++)
-        dictionary[i] = std::string(1, i);
-    
-    std::string w(1, *begin++);
-    std::string result = w;
-    std::string entry;
-    for ( ; begin != end; begin++) {
-        int k = *begin;
-        if (dictionary.count(k))
-            entry = dictionary[k];
-        else if (k == dictSize)
-            entry = w + w[0];
-        else
-            throw "Bad compressed k";
-        
-        result += entry;
-        
-        dictionary[dictSize++] = w + entry[0];
-        
-        w = entry;
-    }
-    return result;
-}
-
-void archivator::decompress(int, char const**) {
-    string bitstring("");
-    string filename("lr5.doc");
-    
-    input.open(filename, ios::binary);
-    char c;
-    if (input) {
-        
-        bitstring = zlwDecode(bitstring);
-        
-    } else
-        printf("[Could not open file %s]\n", filename.c_str());
-    
-}
-
 int main(int argc, const char * argv[]) {
     archivator arc;
     
@@ -200,7 +248,7 @@ int main(int argc, const char * argv[]) {
             cout << "Enter at 1 output file and at least 1 file to compress";
     } else if(!strncmp(argv[1], "--decompress", 12)){
         if (argc == 3)
-            arc.decompress(argc, argv);
+            arc.decompress(argv[2]);
         else
             cout << "Enter only a file to decompress";
     } else
